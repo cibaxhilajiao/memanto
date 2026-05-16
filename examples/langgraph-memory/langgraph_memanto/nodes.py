@@ -8,7 +8,6 @@ the LangGraph pipeline via langgraph_memanto.graph.build_graph().
 from __future__ import annotations
 
 import os
-import json
 from typing import Any, Dict, Literal
 
 from langchain_openai import ChatOpenAI
@@ -46,40 +45,33 @@ def _get_llm():
 
 
 # ---------------------------------------------------------------------------
-# LangChain Tool wrappers (enables actual tool calling by the LLM)
+# LangChain Tool wrapper factory (enables actual tool calling by the LLM)
 # ---------------------------------------------------------------------------
 
-class MemantoRememberTool:
-    """Wrapper to make memanto_remember bindable as a LangChain tool."""
-    name = "memanto_remember"
-    description = (
-        "Store a structured memory in Memanto. "
-        "Use this to save key findings, facts, observations from your research. "
-        "Required args: memory_type, title, content, confidence, tags."
-    )
+def _build_memanto_remember_tool(agent_id: str):
+    """Build a LangChain-compatible tool bound to the current Memanto namespace."""
 
-    def invoke(self, tool_input: str | Dict, agent_id: str = "langgraph-default") -> str:
-        if isinstance(tool_input, str):
-            data = json.loads(tool_input)
-        else:
-            data = tool_input
-        # Pass agent_id in state so memanto_remember uses the correct namespace
-        state = {"memanto_agent_id": agent_id}
+    @tool("memanto_remember")
+    def memanto_remember_tool(
+        memory_type: str,
+        title: str,
+        content: str,
+        confidence: float = 0.85,
+        tags: list[str] | None = None,
+    ) -> str:
+        """Store a structured memory in Memanto for later cross-session recall."""
         result = _memanto_remember(
-            state=state,
+            state={"memanto_agent_id": agent_id},
             api_key=MOORCHEH_API_KEY,
-            memory_type=data.get("memory_type", "observation"),
-            title=data.get("title", "")[:100],
-            content=data.get("content", "")[:500],
-            confidence=float(data.get("confidence", 0.85)),
-            tags=data.get("tags", []),
+            memory_type=memory_type or "observation",
+            title=(title or "")[:100],
+            content=(content or "")[:500],
+            confidence=float(confidence),
+            tags=tags or [],
         )
-        msg = result.get("messages", [{}])[0].get("content", "")
-        return msg
+        return result.get("messages", [{}])[0].get("content", "")
 
-
-# Singleton tool instance
-_memanto_tool = MemantoRememberTool()
+    return memanto_remember_tool
 
 
 # ---------------------------------------------------------------------------
@@ -97,8 +89,8 @@ def research_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     agent_id = state.get("memanto_agent_id", "langgraph-default")
     llm = _get_llm()
 
-    # Bind memanto_remember as an actual tool the LLM can call
-    tools = [_memanto_tool]
+    # Bind memanto_remember as an actual LangChain tool the LLM can call.
+    tools = [_build_memanto_remember_tool(agent_id)]
     llm_with_tools = llm.bind_tools(tools)
 
     system_prompt = (
@@ -126,8 +118,13 @@ def research_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     for tc in tool_calls:
         if tc.get("name") == "memanto_remember":
             args = tc.get("args", {})
-            result = _memanto_tool.invoke(args, agent_id=agent_id)
-            tool_results.append({"role": "tool", "content": result, "name": "memanto_remember"})
+            result = tools[0].invoke(args)
+            tool_results.append({
+                "role": "tool",
+                "content": result,
+                "name": "memanto_remember",
+                "tool_call_id": tc.get("id", f"remember_{len(tool_results)}"),
+            })
             title = args.get("title", "unknown")
             findings.append(title)
 
