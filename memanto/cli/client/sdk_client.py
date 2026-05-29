@@ -389,7 +389,7 @@ class SdkClient:
     def remember(
         self,
         agent_id: str,
-        memory_type: str,
+        memory_type: str | None,
         title: str,
         content: str,
         confidence: float = 0.8,
@@ -427,7 +427,9 @@ class SdkClient:
 
         self._validate_memory_input(memory_type, title, content, confidence)
 
-        resolved_memory_type = cast(MemoryType, memory_type)
+        resolved_memory_type = (
+            cast(MemoryType, memory_type) if memory_type is not None else None
+        )
         resolved_provenance = provenance or "explicit_statement"
         if resolved_provenance not in _VALID_PROVENANCE:
             raise ValueError(
@@ -470,6 +472,7 @@ class SdkClient:
             "namespace": result.get("namespace"),
             "status": result.get("status", "queued"),
             "confidence": confidence,
+            "type": result.get("type"),
         }
 
     def batch_remember(
@@ -511,9 +514,10 @@ class SdkClient:
             title = raw_title or (
                 raw_content[:47] + "..." if len(raw_content) > 50 else raw_content
             )
+            raw_type = item.get("type")
 
             memory = MemoryRecord(
-                type=item.get("type", "fact"),
+                type=raw_type,
                 title=title,
                 content=raw_content,
                 scope_type="agent",
@@ -613,7 +617,7 @@ class SdkClient:
         limit: int | None = None,
         type: list[str] | None = None,
         tags: list[str] | None = None,
-        min_confidence: float | None = None,
+        min_similarity: float | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
     ) -> dict[str, Any]:
@@ -626,15 +630,18 @@ class SdkClient:
             limit: Max results (1–100, defaults to config).
             type: Filter by types.
             tags: Filter by tags.
-            min_confidence: Minimum confidence threshold.
+            min_similarity: Minimum similarity threshold.
             created_after: Only memories created after this datetime.
             created_before: Only memories created before this datetime.
 
         Returns:
             Dict with ``agent_id``, ``query``, ``memories``, ``count``.
         """
+        recall_cfg = ConfigManager().get_recall_config()
         if limit is None:
-            limit = ConfigManager().get_recall_config()["limit"]
+            limit = recall_cfg["limit"]
+        if min_similarity is None:
+            min_similarity = recall_cfg.get("min_similarity")
 
         # Ensure there is a valid, non-expired session for this agent
         self._get_validated_session_for_agent(agent_id)
@@ -650,7 +657,7 @@ class SdkClient:
             scope_id=agent_id,
             type=type,
             tags=tags,
-            min_confidence=min_confidence,
+            min_similarity_score=min_similarity,
             created_after=created_after.isoformat() if created_after else None,
             created_before=created_before.isoformat() if created_before else None,
             limit=limit,
@@ -1204,13 +1211,13 @@ class SdkClient:
 
     @staticmethod
     def _validate_memory_input(
-        memory_type: str,
+        memory_type: str | None,
         title: str,
         content: str,
         confidence: float,
     ) -> None:
         """Validate memory fields before sending to service layer."""
-        if memory_type not in _VALID_MEMORY_TYPES:
+        if memory_type is not None and memory_type not in _VALID_MEMORY_TYPES:
             raise ValueError(
                 f"Invalid memory_type '{memory_type}'. "
                 f"Must be one of: {', '.join(sorted(_VALID_MEMORY_TYPES))}"

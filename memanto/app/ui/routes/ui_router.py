@@ -119,7 +119,10 @@ async def update_ui_config(updates: dict):
     if "recall" in updates and isinstance(updates["recall"], dict):
         rec = updates["recall"]
         _config_manager.set_recall_config(
-            limit=int(rec["limit"]) if "limit" in rec else None
+            limit=int(rec["limit"]) if "limit" in rec else None,
+            min_similarity=float(rec["min_similarity"])
+            if "min_similarity" in rec and rec["min_similarity"] is not None
+            else None,
         )
 
     return {"status": "updated", "updated_keys": list(updates.keys())}

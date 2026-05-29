@@ -29,8 +29,8 @@ from memanto.cli.commands._shared import (
 @app.command()
 def remember(
     content: str | None = typer.Argument(None, help="Memory content to store"),
-    memory_type: str = typer.Option(
-        "fact",
+    memory_type: str | None = typer.Option(
+        None,
         "--type",
         "-t",
         help="Memory type (fact, preference, goal, decision, artifact, learning, event, instruction, relationship, context, observation, commitment, error)",
@@ -163,7 +163,8 @@ def remember(
 
         console.print("[green]Memory stored successfully![/green]")
         console.print(f"[dim]Memory ID: {result.get('memory_id', 'unknown')}[/dim]")
-        console.print(f"[dim]Type: {memory_type} | Confidence: {confidence}[/dim]")
+        parsed_type = result.get("type") or memory_type or "fact"
+        console.print(f"[dim]Type: {parsed_type} | Confidence: {confidence}[/dim]")
         console.print(f"[dim]Completed in {elapsed:.2f}s[/dim]")
 
     except Exception as e:
@@ -247,8 +248,8 @@ def recall(
     memory_type: str | None = typer.Option(
         None, "--type", "-t", help="Filter by memory type"
     ),
-    min_confidence: float | None = typer.Option(
-        None, "--min-confidence", help="Minimum confidence score"
+    min_similarity: float | None = typer.Option(
+        None, "--min-similarity", help="Minimum similarity score"
     ),
     tags: str | None = typer.Option(
         None, "--tags", help="Filter by tags (comma-separated)"
@@ -299,6 +300,8 @@ def recall(
 
     # CLI-side validation for timestamps to fail fast with a clear error
     def _validate_and_parse_timestamp(ts: str, flag_name: str) -> str:
+        """Normalize an ISO or relative timestamp passed to a temporal flag."""
+
         if not ts:
             return ts
 
@@ -360,7 +363,7 @@ def recall(
                     limit=limit,
                     type=type,
                     tags=tag_list,
-                    min_confidence=min_confidence,
+                    min_similarity=min_similarity,
                 )
             else:
                 _error(
@@ -760,6 +763,8 @@ def conflicts(
 
         # Prompt options with recommendation markers
         def _opt(key, label, rec_val, current_rec=rec):
+            """Print a conflict-resolution choice with its recommendation marker."""
+
             marker = " [green]<< recommended[/green]" if current_rec == rec_val else ""
             console.print(f"  [{BRIGHT}][{key}][/{BRIGHT}] {label}{marker}")
 

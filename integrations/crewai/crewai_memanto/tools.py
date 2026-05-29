@@ -128,8 +128,10 @@ class RecallInput(BaseModel):
         description="Natural language search query to find relevant memories.",
     )
     limit: int = Field(
-        default=5,
-        description="Maximum number of memories to retrieve (1-20).",
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of memories to retrieve.",
     )
     memory_types: str = Field(
         default="",
@@ -137,6 +139,12 @@ class RecallInput(BaseModel):
             "Comma-separated memory types to filter by "
             "(e.g. 'fact,observation'). Leave empty for all types."
         ),
+    )
+    min_similarity: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score from 0.0 to 1.0 to filter low-relevance memories.",
     )
 
 
@@ -229,8 +237,9 @@ class MemantoRecallTool(BaseTool):
     def _run(
         self,
         query: str,
-        limit: int = 5,
+        limit: int = 10,
         memory_types: str = "",
+        min_similarity: float | None = None,
     ) -> str:
         type_list = (
             [t.strip() for t in memory_types.split(",") if t.strip()]
@@ -241,8 +250,9 @@ class MemantoRecallTool(BaseTool):
         result = self._client.recall(
             agent_id=self._agent_id,
             query=query,
-            limit=min(limit, 20),
+            limit=limit,
             type=type_list,
+            min_similarity=min_similarity,
         )
 
         memories = result.get("memories", [])

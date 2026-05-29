@@ -30,8 +30,11 @@ from memanto.app.services.memory_write_service import MemoryWriteService
 from memanto.app.utils.errors import map_error_to_http_exception
 from memanto.app.utils.validation import CostGuard
 from memanto.cli.client.direct_client import DirectClient
+from memanto.cli.config.manager import ConfigManager
 
 router = APIRouter()
+
+_config_manager = ConfigManager()
 
 
 class RecallRequest(BaseModel):
@@ -201,6 +204,8 @@ async def remember(
             "status": "queued",
             "provenance": request.provenance,
             "confidence": request.confidence,
+            # Resolved memory type (auto-parsed when not explicitly provided)
+            "type": result.get("type"),
             # "computed_confidence": trust_score["computed_confidence"],
             # "trust_level": trust_score["trust_level"]
         }
@@ -391,7 +396,26 @@ async def recall(
             )
         )
 
-    limit = request.limit if request.limit is not None else settings.RECALL_LIMIT
+    recall_cfg = _config_manager.get_recall_config()
+    raw_limit = (
+        request.limit
+        if request.limit is not None
+        else recall_cfg.get("limit", settings.RECALL_LIMIT)
+    )
+    raw_min_similarity = (
+        request.min_similarity
+        if request.min_similarity is not None
+        else recall_cfg.get("min_similarity")
+    )
+    try:
+        limit = int(raw_limit)
+        min_similarity = (
+            None if raw_min_similarity is None else float(raw_min_similarity)
+        )
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid recall configuration: {e}"
+        )
     CostGuard.validate_k_limit(limit)
 
     try:
@@ -405,7 +429,7 @@ async def recall(
             scope_type="agent",
             scope_id=agent_id,
             type=request.type,
-            min_similarity_score=request.min_similarity,
+            min_similarity_score=min_similarity,
             limit=limit,
         )
 

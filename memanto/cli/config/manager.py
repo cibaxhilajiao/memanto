@@ -186,16 +186,25 @@ class ConfigManager:
         data = self.load_yaml()
         recall = data.get("recall", {})
 
-        defaults = {"limit": 10}
+        defaults = {"limit": 10, "min_similarity": 0.0}
         defaults.update(recall)
         return defaults
 
-    def set_recall_config(self, limit: int | None = None) -> None:
+    def set_recall_config(
+        self, limit: int | None = None, min_similarity: float | None = None
+    ) -> None:
         """Set Recall config values."""
         data = self.load_yaml()
         recall = data.setdefault("recall", {})
         if limit is not None:
             recall["limit"] = limit
+        if min_similarity is not None:
+            if (
+                not isinstance(min_similarity, (int, float))
+                or not 0.0 <= float(min_similarity) <= 1.0
+            ):
+                raise ValueError("min_similarity must be between 0.0 and 1.0")
+            recall["min_similarity"] = min_similarity
         self.save_yaml(data)
 
     # Schedule timing

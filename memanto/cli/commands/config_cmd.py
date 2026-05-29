@@ -47,5 +47,6 @@ def config_show():
     table.add_section()
     table.add_row("[bold]Recall Config[/bold]", "")
     table.add_row("  Limit (Top N)", str(rec_cfg.get("limit", 10)))
+    table.add_row("  Min Similarity", str(rec_cfg.get("min_similarity", 0.0)))
 
     console.print(table)

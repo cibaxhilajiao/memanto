@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-    <a href="https://pypi.org/project/memanto/"><img alt="PyPI - Total Downloads" src="https://img.shields.io/pepy/dt/memanto.svg?color=blue&label=downloads"></a>
+    <a href="https://pepy.tech/projects/memanto"><img alt="PyPI - Total Downloads" src="https://static.pepy.tech/personalized-badge/memanto?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads"></a>
     <a href="https://deepwiki.com/moorcheh-ai/memanto"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg"></a>
     <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
     <a href="https://pypi.org/project/memanto/"><img alt="PyPI Version" src="https://img.shields.io/pypi/v/memanto.svg?color=%2334D058"></a>

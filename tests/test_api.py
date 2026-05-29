@@ -505,6 +505,68 @@ class TestMEMANTOAPI:
         assert "time_remaining_seconds" in data
 
     @pytest.mark.asyncio
+    async def test_remember_body_type_is_respected(
+        self, client, auth_headers, mock_moorcheh
+    ):
+        """Test single remember accepts explicit type from JSON body"""
+        await client.post(
+            "/api/v2/agents",
+            headers=auth_headers,
+            json={"agent_id": self.TEST_AGENT_ID},
+        )
+        activate_resp = await client.post(
+            f"/api/v2/agents/{self.TEST_AGENT_ID}/activate", headers=auth_headers
+        )
+        token = activate_resp.json()["session_token"]
+
+        mock_moorcheh.documents.upload.return_value = {"status": "success"}
+
+        headers = {**auth_headers, "X-Session-Token": token}
+        response = await client.post(
+            f"/api/v2/agents/{self.TEST_AGENT_ID}/remember",
+            headers=headers,
+            json={
+                "content": "my favourite hobby is to listen music. I am musicaholic",
+                "type": "fact",
+            },
+        )
+
+        assert response.status_code == 200
+        # Explicit type is respected and echoed back in the response.
+        assert response.json()["type"] == "fact"
+        uploaded_doc = mock_moorcheh.documents.upload.call_args.kwargs["documents"][0]
+        assert uploaded_doc["memory_type"] == "fact"
+
+    @pytest.mark.asyncio
+    async def test_remember_auto_parses_type_when_omitted(
+        self, client, auth_headers, mock_moorcheh
+    ):
+        """Test single remember auto-detects the type when none is provided"""
+        await client.post(
+            "/api/v2/agents",
+            headers=auth_headers,
+            json={"agent_id": self.TEST_AGENT_ID},
+        )
+        activate_resp = await client.post(
+            f"/api/v2/agents/{self.TEST_AGENT_ID}/activate", headers=auth_headers
+        )
+        token = activate_resp.json()["session_token"]
+
+        mock_moorcheh.documents.upload.return_value = {"status": "success"}
+
+        headers = {**auth_headers, "X-Session-Token": token}
+        response = await client.post(
+            f"/api/v2/agents/{self.TEST_AGENT_ID}/remember",
+            headers=headers,
+            json={"content": "I really love using Python for data work"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["type"] == "preference"
+        uploaded_doc = mock_moorcheh.documents.upload.call_args.kwargs["documents"][0]
+        assert uploaded_doc["memory_type"] == "preference"
+
+    @pytest.mark.asyncio
     async def test_global_status_no_active_session(self, client):
         """Test GET /api/v2/status returns 404 when no session is active"""
         response = await client.get("/api/v2/status")
