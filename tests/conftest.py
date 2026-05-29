@@ -4,6 +4,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def reset_auto_parse(monkeypatch):
+    """Ensure tests are not affected by the local smart_parse config setting."""
+    from memanto.app.config import settings
+
+    monkeypatch.setattr(settings, "AUTO_PARSE_ENABLED", True)
+
+
+@pytest.fixture(autouse=True)
 def mock_moorcheh_for_tests():
     """Prevent tests from calling real Moorcheh APIs."""
     with (
