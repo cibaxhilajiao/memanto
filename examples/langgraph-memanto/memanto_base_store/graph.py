@@ -33,15 +33,11 @@ from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import RetryPolicy
-from pydantic import BaseModel, Field, model_validator
-
 from langgraph.store.base import BaseStore
-
-from memanto.cli.client.sdk_client import SdkClient
-
+from langgraph.types import RetryPolicy
 from memanto_base_store.memanto_store import MemantoStore
 from memanto_base_store.state import SupportState
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +150,7 @@ def _parse_memories_response(response) -> ExtractedMemories:
     # Raw model output can contain user-sensitive content (emails, health
     # facts, contact preferences). Log at DEBUG so it's available when a
     # developer opts in but not emitted by default to INFO log sinks.
-    logger.info(
-        "_parse_memories_response: model returned %d chars", len(text)
-    )
+    logger.info("_parse_memories_response: model returned %d chars", len(text))
     logger.debug(
         "_parse_memories_response: raw model output:\n%s",
         text[:1500] + ("...[truncated]" if len(text) > 1500 else ""),
@@ -216,9 +210,7 @@ def _parse_line_format(text: str) -> list[ExtractedMemory]:
             kind = "fact"
         title = content[:80]
         try:
-            memories.append(
-                ExtractedMemory(kind=kind, content=content, title=title)
-            )
+            memories.append(ExtractedMemory(kind=kind, content=content, title=title))
         except Exception as e:  # pragma: no cover - defensive
             logger.debug("_parse_line_format: skipping malformed line %r: %s", line, e)
     return memories
@@ -289,7 +281,13 @@ def _make_llm(temperature: float = 0.2, max_tokens: int | None = None) -> ChatOp
         "model": model,
         "temperature": temperature,
         "api_key": api_key,
-        "base_url": os.environ.get("OPENAI_API_BASE", "https://openrouter.ai/api/v1" if os.environ.get("OPENROUTER_API_KEY") else None) or None,
+        "base_url": os.environ.get(
+            "OPENAI_API_BASE",
+            "https://openrouter.ai/api/v1"
+            if os.environ.get("OPENROUTER_API_KEY")
+            else None,
+        )
+        or None,
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
@@ -336,20 +334,14 @@ def _user_id_from_config(config) -> str:
 
 
 def build_support_graph(
-    client: SdkClient,
-    agent_id: str,
+    api_key: str,
     llm: ChatOpenAI | None = None,
 ):
     """Compile a customer-support graph with MemantoStore + InMemorySaver.
 
     Args:
-        client: Active Memanto SdkClient (output of MemantoSetup.setup).
-        agent_id: The Memanto agent ID this graph writes against.
+        api_key: Moorcheh API key to provision Memanto clients.
         llm: Optional override for the underlying chat model.
-
-    Returns:
-        A compiled LangGraph. Invoke with ``config={"configurable": {
-        "thread_id": "...", "user_id": "..."}}``.
     """
     chat = llm or _default_llm()
     # Separate extractor at temperature=0.1 (not 0) for reliable multi-item output.
@@ -374,11 +366,9 @@ def build_support_graph(
     extractor = extractor_llm | RunnableLambda(_parse_memories_response)
     # MemantoStore is created here and passed to compile(store=...) below.
     # LangGraph then injects it into any node that declares `*, store: BaseStore`.
-    store = MemantoStore(client, agent_id)
+    store = MemantoStore(api_key=api_key)
 
-    async def recall_context(
-        state: SupportState, config, *, store: BaseStore
-    ) -> dict:
+    async def recall_context(state: SupportState, config, *, store: BaseStore) -> dict:
         """Pull cross-thread memories for this user, scoped by user_id."""
         user_id = _user_id_from_config(config)
         last_user_msg = next(
@@ -511,7 +501,9 @@ def build_support_graph(
     builder = StateGraph(SupportState)
     builder.add_node("recall_context", recall_context)
     builder.add_node("respond", respond, retry_policy=_rate_limit_retry)
-    builder.add_node("extract_and_store", extract_and_store, retry_policy=_rate_limit_retry)
+    builder.add_node(
+        "extract_and_store", extract_and_store, retry_policy=_rate_limit_retry
+    )
     builder.add_edge(START, "recall_context")
     builder.add_edge("recall_context", "respond")
     builder.add_edge("respond", "extract_and_store")

@@ -13,13 +13,12 @@ import logging
 import os
 import sys
 
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
-
 from memanto_base_store.graph import build_support_graph, latest_assistant_text
 from memanto_base_store.memanto_setup import MemantoSetup
+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
 AGENT_ID = "langgraph-customer-support"
 USER_ID = "bob"
@@ -37,10 +36,16 @@ async def main() -> None:
 
     api_key = os.environ.get("MOORCHEH_API_KEY")
     if not api_key:
-        print("Error: MOORCHEH_API_KEY not set. Copy .env.example to .env and fill it in.")
+        print(
+            "Error: MOORCHEH_API_KEY not set. Copy .env.example to .env and fill it in."
+        )
         sys.exit(1)
-    if not os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
-        print("Error: OPENROUTER_API_KEY or OPENAI_API_KEY not set. Get one at https://openrouter.ai/keys.")
+    if not os.environ.get("OPENROUTER_API_KEY") and not os.environ.get(
+        "OPENAI_API_KEY"
+    ):
+        print(
+            "Error: OPENROUTER_API_KEY or OPENAI_API_KEY not set. Get one at https://openrouter.ai/keys."
+        )
         sys.exit(1)
 
     setup = MemantoSetup(api_key)

@@ -29,8 +29,6 @@ load_dotenv()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-AGENT_ID = "langgraph-customer-support"
-
 # Timeout for LLM calls (seconds). RetryPolicy may sleep 32 s per attempt x 5.
 _LLM_TIMEOUT = 300
 
@@ -59,7 +57,10 @@ KIND_COLORS = {
 
 # ── Async helpers ─────────────────────────────────────────────────────────────
 
-def _run(coro, *, pool: concurrent.futures.ThreadPoolExecutor, timeout: float = _LLM_TIMEOUT):
+
+def _run(
+    coro, *, pool: concurrent.futures.ThreadPoolExecutor, timeout: float = _LLM_TIMEOUT
+):
     """Run *coro* in *pool*, block with *timeout* seconds. Raises on error."""
     future = pool.submit(asyncio.run, coro)
     return future.result(timeout=timeout)
@@ -74,15 +75,19 @@ async def _invoke(graph, thread_id: str, user_msg: str, user_id: str) -> str:
     for m in reversed(result["messages"]):
         if isinstance(m, AIMessage):
             c = m.content
-            return c if isinstance(c, str) else "".join(
-                p.get("text", "") if isinstance(p, dict) else str(p) for p in c
+            return (
+                c
+                if isinstance(c, str)
+                else "".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p) for p in c
+                )
             )
     return "(no reply)"
 
 
-async def _fetch_memories(store, user_id: str):
+async def _fetch_memories(store, user_id: str, target_namespace: str = "memories"):
     """Return up to 20 memories under ``(user_id, "memories")`` for the panel."""
-    return await store.asearch((user_id, "memories"), query="*", limit=20)
+    return await store.asearch((user_id, target_namespace), query="*", limit=20)
 
 
 async def _poll_for_memories(
@@ -111,6 +116,7 @@ async def _poll_for_memories(
 # changes the hash changes, _load() is called with a new argument, and
 # @st.cache_resource builds a fresh graph with the updated code.
 
+
 def _graph_hash() -> str:
     """Short MD5 of graph.py. Changes here bust the @st.cache_resource."""
     try:
@@ -120,7 +126,6 @@ def _graph_hash() -> str:
         return "0"
 
 
-@st.cache_resource(show_spinner="Connecting to Memanto...")
 def _load(_graph_version: str = ""):
     """Set up Memanto + compile the graph once per ``_graph_version`` value.
 
@@ -129,16 +134,11 @@ def _load(_graph_version: str = ""):
     without a manual server restart.
     """
     from memanto_base_store.graph import build_support_graph
-    from memanto_base_store.memanto_setup import MemantoSetup
     from memanto_base_store.memanto_store import MemantoStore
 
     api_key = os.environ.get("MOORCHEH_API_KEY", "")
-    client = MemantoSetup(api_key).setup(
-        agent_id=AGENT_ID,
-        description="LangGraph customer-support agent (cross-session demo)",
-    )
-    graph = build_support_graph(client, AGENT_ID)
-    store = MemantoStore(client, AGENT_ID)
+    graph = build_support_graph(api_key)
+    store = MemantoStore(api_key)
     return graph, store
 
 
@@ -152,7 +152,9 @@ st.set_page_config(
 
 # ── API key guard ─────────────────────────────────────────────────────────────
 
-missing = [k for k in ("MOORCHEH_API_KEY", "OPENROUTER_API_KEY") if not os.environ.get(k)]
+missing = [
+    k for k in ("MOORCHEH_API_KEY", "OPENROUTER_API_KEY") if not os.environ.get(k)
+]
 if missing:
     st.error(
         f"Missing env vars: {', '.join(f'`{k}`' for k in missing)}. "
@@ -209,7 +211,6 @@ with st.sidebar:
         "Memanto for this user, updated after each message."
     )
     st.divider()
-    st.caption(f"Agent ID: `{AGENT_ID}`")
     st.caption(f"User: `{st.session_state.user_id}`")
     st.caption(f"S1 thread: `{st.session_state.s1_thread}`")
     st.caption(f"S2 thread: `{st.session_state.s2_thread}`")
@@ -251,7 +252,11 @@ chat_col, mem_col = st.columns([3, 1], gap="large")
 with mem_col:
     _mem_error: str | None = None
     try:
-        mems = _run(_fetch_memories(store, st.session_state.user_id), pool=_STORE_POOL, timeout=15)
+        mems = _run(
+            _fetch_memories(store, st.session_state.user_id, "memories"),
+            pool=_STORE_POOL,
+            timeout=15,
+        )
     except Exception as _e:
         mems = []
         _mem_error = str(_e)
@@ -298,10 +303,12 @@ with mem_col:
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 with chat_col:
-    tab1, tab2 = st.tabs([
-        "💬 Session 1: Store Preferences",
-        "🆕 Session 2: Fresh Thread (Recall)",
-    ])
+    tab1, tab2 = st.tabs(
+        [
+            "💬 Session 1: Store Preferences",
+            "🆕 Session 2: Fresh Thread (Recall)",
+        ]
+    )
 
     def _render_history(msgs: list) -> None:
         """Render a list of ``(role, text)`` tuples as Streamlit chat bubbles."""
@@ -376,7 +383,10 @@ with chat_col:
                 "<div style='opacity:0.6;font-size:0.85rem'>💡 Try the suggested prompt below</div>",
                 unsafe_allow_html=True,
             )
-            if st.button(f"📋 Use suggested: *\"{SUGGESTED_S1[:60]}...\"*", use_container_width=True):
+            if st.button(
+                f'📋 Use suggested: *"{SUGGESTED_S1[:60]}..."*',
+                use_container_width=True,
+            ):
                 _send("s1", st.session_state.s1_thread, SUGGESTED_S1)
 
         if prompt1 := st.chat_input(
@@ -408,7 +418,9 @@ with chat_col:
                 "</div>",
                 unsafe_allow_html=True,
             )
-            if st.button(f"📋 Use suggested: *\"{SUGGESTED_S2}\"*", use_container_width=True):
+            if st.button(
+                f'📋 Use suggested: *"{SUGGESTED_S2}"*', use_container_width=True
+            ):
                 _send("s2", st.session_state.s2_thread, SUGGESTED_S2)
 
         if prompt2 := st.chat_input(

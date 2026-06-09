@@ -38,8 +38,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from langgraph.store.base import (
     BaseStore,
@@ -55,7 +56,6 @@ from memanto.cli.client.sdk_client import SdkClient
 
 logger = logging.getLogger(__name__)
 
-_NS_TAG_PREFIX = "lg:ns:"
 _KEY_TAG_PREFIX = "lg:key:"
 _RESERVED_PREFIX = "lg:"
 
@@ -99,18 +99,30 @@ class MemantoStore(BaseStore):
     # nodes) from burning rate-limit budget on identical queries.
     _CACHE_TTL_S = 30.0
 
-    def __init__(self, client: SdkClient, agent_id: str) -> None:
-        """Wrap an active Memanto ``SdkClient`` as a LangGraph ``BaseStore``.
-
-        ``client`` must have an active session for ``agent_id`` (call
-        ``MemantoSetup.setup(agent_id)`` first).
-        """
-        self._client = client
-        self._agent_id = agent_id
+    def __init__(self, api_key: str) -> None:
+        """Initialize MemantoStore with an API key."""
+        self.api_key = api_key
+        self._client_pool: dict[str, SdkClient] = {}
+        self._agent_prefix = "langgraph_"
         # (namespace, query, limit, type, min_sim) -> (timestamp, list[SearchItem])
         self._search_cache: dict[tuple, tuple[float, list[SearchItem]]] = {}
         # Survives 429s without flashing the UI panel to zero.
         self._last_good: dict[tuple[str, ...], list[SearchItem]] = {}
+
+    def _ensure_client(self, namespace: tuple[str, ...]) -> tuple[SdkClient, str]:
+        ns_str = "_".join(namespace) or "default"
+        agent_id = f"{self._agent_prefix}{ns_str}"
+        if agent_id not in self._client_pool:
+            from memanto.app.utils.errors import AgentAlreadyExistsError
+
+            client = SdkClient(api_key=self.api_key)
+            try:
+                client.create_agent(agent_id=agent_id, pattern="tool")
+            except AgentAlreadyExistsError:
+                pass
+            client.activate_agent(agent_id=agent_id)
+            self._client_pool[agent_id] = client
+        return self._client_pool[agent_id], agent_id
 
     # ------------------------------------------------------------------ #
     # Required abstract methods                                          #
@@ -122,8 +134,10 @@ class MemantoStore(BaseStore):
 
     async def abatch(self, ops: Iterable[Any]) -> list[Any]:
         """Execute a batch of store operations asynchronously."""
-        op_list = list(ops)
-        return await asyncio.to_thread(self.batch, op_list)
+        # Run operations concurrently in threads rather than sequentially
+        loop = asyncio.get_running_loop()
+        tasks = [loop.run_in_executor(None, self._dispatch_one, op) for op in ops]
+        return await asyncio.gather(*tasks)
 
     # ------------------------------------------------------------------ #
     # Per-op dispatch                                                    #
@@ -150,15 +164,14 @@ class MemantoStore(BaseStore):
         Uses ``recall_recent`` first (no semantic bias) so the target memory
         is not crowded out by cosine-similarity ranking. Falls back to a
         semantic recall if not found in the recent window.
-        Both passes enforce namespace + key tags client-side.
         """
-        ns_tags = self._namespace_to_tags(op.namespace)
+        client, agent_id = self._ensure_client(op.namespace)
         key_tag = self._key_to_tag(op.key)
-        required_tags = ns_tags + [key_tag]
+        required_tags = [key_tag]
 
         # recall_recent avoids semantic bias in key lookup
-        result = self._client.recall_recent(
-            agent_id=self._agent_id,
+        result = client.recall_recent(
+            agent_id=agent_id,
             limit=self._MEMANTO_RECALL_CAP,
         )
         for mem in result.get("memories", []):
@@ -168,11 +181,11 @@ class MemantoStore(BaseStore):
 
         # Fallback: semantic recall may surface older memories
         try:
-            result = self._client.recall(
-                agent_id=self._agent_id,
+            result = client.recall(
+                agent_id=agent_id,
                 query=op.key or "*",
                 limit=self._MEMANTO_RECALL_CAP,
-                tags=ns_tags + [key_tag],
+                tags=[key_tag],
             )
         except Exception as exc:
             logger.warning("MemantoStore._do_get fallback recall failed: %s", exc)
@@ -229,14 +242,11 @@ class MemantoStore(BaseStore):
             for t in (value.pop("tags", []) or [])
             if not str(t).startswith(_RESERVED_PREFIX)
         ]
-        all_tags = (
-            user_tags
-            + self._namespace_to_tags(op.namespace)
-            + [self._key_to_tag(op.key)]
-        )
+        all_tags = user_tags + [self._key_to_tag(op.key)]
 
-        self._client.remember(
-            agent_id=self._agent_id,
+        client, agent_id = self._ensure_client(op.namespace)
+        client.remember(
+            agent_id=agent_id,
             memory_type=memory_type,
             title=title,
             content=str(raw_content),
@@ -267,7 +277,6 @@ class MemantoStore(BaseStore):
         """
         query = op.query or "*"
         filter_dict = op.filter or {}
-        ns_tags = self._namespace_to_tags(op.namespace_prefix)
 
         type_filter = filter_dict.get("type") or filter_dict.get("kind")
         if isinstance(type_filter, str):
@@ -293,27 +302,39 @@ class MemantoStore(BaseStore):
         fetch_limit = max(1, min(op.limit, self._MEMANTO_RECALL_CAP))
         rate_limited = False
 
+        client, agent_id = self._ensure_client(op.namespace_prefix)
+
         try:
             if query == "*" and not min_similarity:
                 # recall_recent: no semantic bias, returns newest memories first
-                result = self._client.recall_recent(
-                    agent_id=self._agent_id,
+                result = client.recall_recent(
+                    agent_id=agent_id,
                     limit=self._MEMANTO_RECALL_CAP,
                     type=type_filter or None,
                 )
             else:
-                result = self._client.recall(
-                    agent_id=self._agent_id,
+                result = client.recall(
+                    agent_id=agent_id,
                     query=query,
                     limit=fetch_limit,
                     type=type_filter or None,
-                    tags=ns_tags + extra_tags if (ns_tags or extra_tags) else None,
+                    tags=extra_tags if extra_tags else None,
                     min_similarity=min_similarity,
                 )
         except Exception as exc:
             logger.warning("MemantoStore._do_search recall failed: %s", exc)
             err = str(exc)
-            if any(m in err for m in ("429", "Limit Exceeded", "Forbidden", "Unauthorized", "401", "403")):
+            if any(
+                m in err
+                for m in (
+                    "429",
+                    "Limit Exceeded",
+                    "Forbidden",
+                    "Unauthorized",
+                    "401",
+                    "403",
+                )
+            ):
                 rate_limited = True
                 result = {"memories": []}
             else:
@@ -322,14 +343,10 @@ class MemantoStore(BaseStore):
         out: list[SearchItem] = []
         for mem in result.get("memories", []):
             tags = mem.get("tags") or []
-            # AND-match on namespace tags (Moorcheh tag filter is OR server-side)
-            if ns_tags and not all(t in tags for t in ns_tags):
-                continue
             if extra_tags and not all(t in tags for t in extra_tags):
                 continue
             key = self._tags_to_key(tags) or mem.get("id", "")
-            namespace = self._tags_to_namespace(tags) or op.namespace_prefix
-            out.append(self._memory_to_search_item(mem, namespace, key))
+            out.append(self._memory_to_search_item(mem, op.namespace_prefix, key))
 
         out = out[: op.limit]
 
@@ -351,66 +368,53 @@ class MemantoStore(BaseStore):
     # ------------------------------------------------------------------ #
 
     def _do_list_namespaces(self, op: ListNamespacesOp) -> list[tuple[str, ...]]:
-        """Sample recent memories and derive unique namespaces from their tags."""
-        sample_limit = min(
-            max(op.limit or 0, self._MEMANTO_RECALL_CAP),
-            self._MEMANTO_RECALL_CAP,
-        )
+        """List namespaces by fetching all Memanto agents with the prefix."""
+        client = SdkClient(api_key=self.api_key)
         try:
-            sample = self._client.recall_recent(
-                agent_id=self._agent_id,
-                limit=sample_limit,
-            )
-        except Exception:
-            sample = {}
+            agents = client.list_agents()
+        except Exception as e:
+            logger.warning("MemantoStore: Failed to list agents: %s", e)
+            return []
 
-        seen: set[tuple[str, ...]] = set()
-        for mem in sample.get("memories", []):
-            ns = self._tags_to_namespace(mem.get("tags") or [])
-            if ns:
-                seen.add(ns)
+        namespaces = []
+        for agent in agents:
+            agent_id = agent.get("agent_id") or agent.get("id") or ""
+            if agent_id.startswith(self._agent_prefix):
+                ns_str = agent_id[len(self._agent_prefix) :]
+                if ns_str == "default":
+                    namespaces.append(())
+                else:
+                    namespaces.append(tuple(ns_str.split("_")))
 
-        result = sorted(seen)
+        if op.match_conditions:
+            for cond in op.match_conditions:
+                if getattr(cond, "match_type", "prefix") == "prefix":
+                    namespaces = [
+                        ns for ns in namespaces if ns[: len(cond.path)] == cond.path
+                    ]
+                else:
+                    namespaces = [
+                        ns for ns in namespaces if ns[-len(cond.path) :] == cond.path
+                    ]
+
+        result = sorted(set(namespaces))
         if op.max_depth is not None:
-            result = [ns[: op.max_depth] for ns in result]
-            result = sorted(set(result))
-        if op.limit:
-            result = result[: op.limit]
-        return result
+            result = sorted({ns[: op.max_depth] for ns in result})
+        return result[: op.limit] if op.limit else result
 
     # ------------------------------------------------------------------ #
     # Encoding helpers                                                   #
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _namespace_to_tags(namespace: tuple[str, ...]) -> list[str]:
-        return [f"{_NS_TAG_PREFIX}{i}:{part}" for i, part in enumerate(namespace)]
-
-    @staticmethod
     def _key_to_tag(key: str) -> str:
         return f"{_KEY_TAG_PREFIX}{key}"
-
-    @staticmethod
-    def _tags_to_namespace(tags: list[str]) -> tuple[str, ...]:
-        positioned: dict[int, str] = {}
-        for t in tags:
-            if not t.startswith(_NS_TAG_PREFIX):
-                continue
-            rest = t[len(_NS_TAG_PREFIX):]
-            idx_str, _, value = rest.partition(":")
-            try:
-                positioned[int(idx_str)] = value
-            except ValueError:
-                continue
-        if not positioned:
-            return ()
-        return tuple(positioned[i] for i in sorted(positioned))
 
     @staticmethod
     def _tags_to_key(tags: list[str]) -> str | None:
         for t in tags:
             if t.startswith(_KEY_TAG_PREFIX):
-                return t[len(_KEY_TAG_PREFIX):]
+                return t[len(_KEY_TAG_PREFIX) :]
         return None
 
     @staticmethod
