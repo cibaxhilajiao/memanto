@@ -13,8 +13,36 @@ pip install langgraph-memanto
 - **Native LangChain Tools**: Easy-to-use `@tool` wrappers that LangGraph agents can autonomously call (`memanto_remember`, `memanto_recall`, `memanto_answer`).
 - **Graph Nodes**: Pre-built nodes (`create_recall_node`, `create_remember_node`) for automatic memory injection and storage within your graph.
 - **Cross-Session Persistence**: Memories stored by your agents survive across threads, sessions, and even different agents within the same namespace.
+- **BaseStore Implementation**: Use `MemantoStore` as a drop-in replacement for LangGraph's `BaseStore` to persist memories using Memanto through the official LangGraph store API.
 
 ## Usage
+
+### Using MemantoStore
+
+You can use `MemantoStore` as the backend for the official LangGraph Store abstraction. This gives your graph persistent, cross-thread, and cross-session memory automatically.
+
+```python
+from langgraph_memanto import MemantoStore
+from langgraph.graph import StateGraph, MessagesState
+from langgraph.checkpoint.memory import MemorySaver
+
+# Initialize the MemantoStore (uses api_key instead of client object directly)
+store = MemantoStore(api_key="your_moorcheh_api_key")
+
+# Build your graph as normal
+builder = StateGraph(MessagesState)
+builder.add_node("agent", agent_node)
+# ... add edges ...
+
+# Compile with the store
+graph = builder.compile(
+    store=store,
+    checkpointer=MemorySaver()
+)
+
+# Nodes can now access the store via langgraph.store.base.BaseStore API
+# e.g., store.put(namespace, key, {"content": "...", "type": "fact"})
+```
 
 ### Using Tools
 
