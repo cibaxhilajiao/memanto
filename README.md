@@ -58,6 +58,24 @@
 
 Most memory tools today are passive infrastructure: agents have to query them, parse the results, and figure out what to do next. MEMANTO is built differently. It's an active memory agent designed from the gaps agents themselves named when asked about their memory — three operations (`remember`, `recall`, `answer`) that give your agents persistent context across sessions, with state-of-the-art retrieval and zero ingestion latency.
 
+<div align="center">
+  <h2>Memanto in action</h2>
+  <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin: 20px 0;">
+    <div style="text-align: center;">
+      <video autoplay loop muted playsinline width="400" style="border-radius: 8px; max-width: 100%;">
+        <source src="https://github.com/moorcheh-ai/memanto/raw/main/assets/Before.mp4" type="video/mp4">
+      </video>
+      <p style="margin-top: 8px;"><strong>Without Memanto</strong></p>
+    </div>
+    <div style="text-align: center;">
+      <video autoplay loop muted playsinline width="400" style="border-radius: 8px; max-width: 100%;">
+        <source src="https://github.com/moorcheh-ai/memanto/raw/main/assets/After.mp4" type="video/mp4">
+      </video>
+      <p style="margin-top: 8px;"><strong>With Memanto</strong></p>
+    </div>
+  </div>
+</div>
+
 ## Get started in 2 minutes
 
 Works on macOS, Linux, and Windows.
