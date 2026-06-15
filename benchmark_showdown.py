@@ -367,7 +367,7 @@ def build_report_markdown(
     lines.append("## Scenario A: Context-Overhead & Latency Sprint")
     lines.append("")
     lines.append(
-        f"{sa['sessions']} dense sessions × {sa['total_messages'] // sa['sessions']} messages "
+        f"{sa['sessions']} dense sessions × {sa['total_messages'] // sa['sessions'] if sa['sessions'] else 0} messages "
         f"({sa['total_tokens']:,} content tokens)"
     )
     lines.append("")
